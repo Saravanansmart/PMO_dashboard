@@ -1,23 +1,20 @@
 document.addEventListener('DOMContentLoaded', () => {
     // Initial data or load from localStorage
     let tasks = JSON.parse(localStorage.getItem('pmo-tasks')) || [];
-    
-    // Seed requested initial data if not already seeded
-    if (!localStorage.getItem('pmo-tasks-seeded')) {
-        const seedTasks = [
-            { id: "seed1", title: "Service group creation issue fix", stakeholder: "-", assignee: "manibharathi", priority: "High", status: "live", datePlanned: "", eta: "" },
-            { id: "seed2", title: "Swapna ticket assignment", stakeholder: "-", assignee: "manibharathi", priority: "Medium", status: "live", datePlanned: "", eta: "" },
-            { id: "seed3", title: "Milestone sync - TTL flow", stakeholder: "-", assignee: "manibharathi", priority: "High", status: "in-progress", datePlanned: "", eta: "" },
-            { id: "seed4", title: "validity removal script", stakeholder: "-", assignee: "dharneesh", priority: "Medium", status: "in-qe", datePlanned: "", eta: "" },
-            { id: "seed5", title: "talk to lawyer - need to collect email and city post payment  - in self serve page", stakeholder: "-", assignee: "austin", priority: "High", status: "todo", datePlanned: "", eta: "" },
-            { id: "seed6", title: "need to enable discount for executive - till 76%. beyond 76% - require approval from manager", stakeholder: "-", assignee: "Manibharathi", priority: "Medium", status: "backlog", datePlanned: "", eta: "" },
-            { id: "seed7", title: "changes in Annual Compliance - CCFS Scheme - service", stakeholder: "-", assignee: "Manibharathi", priority: "Medium", status: "backlog", datePlanned: "", eta: "" },
-            { id: "seed8", title: "Consolidated Compliance dashboard", stakeholder: "-", assignee: "manibharathi", priority: "High", status: "backlog", datePlanned: "", eta: "" }
-        ];
-        
-        tasks = [...tasks, ...seedTasks];
+
+    // Automatically remove duplicates based on title if any exist from before
+    const uniqueTasks = [];
+    const titlesSeen = new Set();
+    tasks.forEach(t => {
+        const titleLower = t.title.toLowerCase().trim();
+        if (!titlesSeen.has(titleLower)) {
+            titlesSeen.add(titleLower);
+            uniqueTasks.push(t);
+        }
+    });
+    if (uniqueTasks.length !== tasks.length) {
+        tasks = uniqueTasks;
         localStorage.setItem('pmo-tasks', JSON.stringify(tasks));
-        localStorage.setItem('pmo-tasks-seeded', 'true');
     }
 
     // DOM Elements
@@ -187,9 +184,23 @@ document.addEventListener('DOMContentLoaded', () => {
         if (idInput.value) {
             // Update
             const index = tasks.findIndex(t => t.id === taskData.id);
-            if (index !== -1) tasks[index] = taskData;
+            if (index !== -1) {
+                // Check if editing causes a duplicate
+                const isDuplicate = tasks.some(t => t.id !== taskData.id && t.title.toLowerCase().trim() === taskData.title.toLowerCase());
+                if (isDuplicate) {
+                    alert('A task with this title already exists!');
+                    return;
+                }
+                tasks[index] = taskData;
+            }
         } else {
             // Add
+            // Prevent adding a new duplicate
+            const isDuplicate = tasks.some(t => t.title.toLowerCase().trim() === taskData.title.toLowerCase());
+            if (isDuplicate) {
+                alert('A task with this title already exists!');
+                return;
+            }
             tasks.push(taskData);
         }
 
