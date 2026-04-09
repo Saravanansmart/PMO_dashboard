@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PMO Task Tracking Dashboard</title>
+    <meta name="description" content="Dashboard to track inflow tasks from stakeholders through various stages.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <header class="dashboard-header">
+        <div class="header-content">
+            <h1>PMO Dashboard</h1>
+            <button id="add-task-btn" class="primary-btn">+ New Task</button>
+        </div>
+    </header>
+
+    <main class="kanban-board">
+        <!-- Columns -->
+        <div class="kanban-column" id="col-backlog" data-status="backlog">
+            <h2 class="column-header">Backlog <span class="task-count">0</span></h2>
+            <div class="kanban-cards" ondrop="drop(event)" ondragover="allowDrop(event)"></div>
+        </div>
+
+        <div class="kanban-column" id="col-todo" data-status="todo">
+            <h2 class="column-header">To Do <span class="task-count">0</span></h2>
+            <div class="kanban-cards" ondrop="drop(event)" ondragover="allowDrop(event)"></div>
+        </div>
+
+        <div class="kanban-column" id="col-in-progress" data-status="in-progress">
+            <h2 class="column-header">In Progress <span class="task-count">0</span></h2>
+            <div class="kanban-cards" ondrop="drop(event)" ondragover="allowDrop(event)"></div>
+        </div>
+
+        <div class="kanban-column" id="col-in-qe" data-status="in-qe">
+            <h2 class="column-header">In QE <span class="task-count">0</span></h2>
+            <div class="kanban-cards" ondrop="drop(event)" ondragover="allowDrop(event)"></div>
+        </div>
+        
+        <div class="kanban-column" id="col-on-hold" data-status="on-hold">
+            <h2 class="column-header">On Hold <span class="task-count">0</span></h2>
+            <div class="kanban-cards" ondrop="drop(event)" ondragover="allowDrop(event)"></div>
+        </div>
+
+        <div class="kanban-column" id="col-live" data-status="live">
+            <h2 class="column-header">Live <span class="task-count">0</span></h2>
+            <div class="kanban-cards" ondrop="drop(event)" ondragover="allowDrop(event)"></div>
+        </div>
+    </main>
+
+    <!-- Modal for Adding/Editing Tasks -->
+    <div id="task-modal" class="modal-overlay">
+        <div class="modal">
+            <div class="modal-header">
+                <h2 id="modal-title">Add New Task</h2>
+                <button id="close-modal-btn" class="close-btn">&times;</button>
+            </div>
+            <form id="task-form">
+                <input type="hidden" id="task-id">
+                
+                <div class="form-group">
+                    <label for="task-title">Task Title</label>
+                    <input type="text" id="task-title" required placeholder="e.g. Implement Oauth2">
+                </div>
+                
+                <div class="form-group">
+                    <label for="task-stakeholder">Stakeholder</label>
+                    <input type="text" id="task-stakeholder" required placeholder="e.g. Marketing, Product">
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="task-assignee">Assignee</label>
+                        <input type="text" id="task-assignee" placeholder="e.g. Jane Doe">
+                    </div>
+                    <div class="form-group">
+                        <label for="task-priority">Priority</label>
+                        <select id="task-priority">
+                            <option value="Low">Low</option>
+                            <option value="Medium" selected>Medium</option>
+                            <option value="High">High</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="task-date-planned">Date Planned to Dev</label>
+                        <input type="date" id="task-date-planned">
+                    </div>
+                    <div class="form-group">
+                        <label for="task-eta">ETA for Completion</label>
+                        <input type="date" id="task-eta">
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="task-status">Status</label>
+                        <select id="task-status">
+                            <option value="backlog">Backlog</option>
+                            <option value="todo">To Do</option>
+                            <option value="in-progress">In Progress</option>
+                            <option value="in-qe">In QE</option>
+                            <option value="on-hold">On Hold</option>
+                            <option value="live">Live</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="task-type">Task Type</label>
+                        <select id="task-type">
+                            <option value="New feature" selected>New feature</option>
+                            <option value="Hotfix">Hotfix</option>
+                            <option value="Enhancements/addon">Enhancements/addon</option>
+                            <option value="not an Requirement">not an Requirement</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="modal-actions">
+                    <button type="button" id="delete-task-btn" class="danger-btn hidden">Delete Task</button>
+                    <button type="submit" class="primary-btn" id="save-task-btn">Save Task</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
