@@ -35,6 +35,34 @@ document.addEventListener('DOMContentLoaded', () => {
     const etaInput = document.getElementById('task-eta');
     const statusInput = document.getElementById('task-status');
     const typeInput = document.getElementById('task-type');
+    const sprintInput = document.getElementById('task-sprint');
+    
+    // Filter Elements
+    const filterAssignee = document.getElementById('filter-assignee');
+    const filterDate = document.getElementById('filter-date');
+    const filterSprint = document.getElementById('filter-sprint');
+    const clearFiltersBtn = document.getElementById('clear-filters-btn');
+
+    // Import/Export Elements
+    const exportBtn = document.getElementById('export-btn');
+    const importBtn = document.getElementById('import-btn');
+    const importFile = document.getElementById('import-file');
+
+    // GitHub Settings Elements
+    const githubSettingsBtn = document.getElementById('github-settings-btn');
+    const githubModal = document.getElementById('github-modal');
+    const closeGithubModalBtn = document.getElementById('close-github-modal-btn');
+    const githubForm = document.getElementById('github-form');
+    const ghOrgInput = document.getElementById('gh-org');
+    const ghProjectNumInput = document.getElementById('gh-project-num');
+    const ghTokenInput = document.getElementById('gh-token');
+    const pullGithubBtn = document.getElementById('pull-github-btn');
+    
+    // Load existing settings
+    const ghSettings = JSON.parse(localStorage.getItem('gh-settings') || '{}');
+    if (ghSettings.org) ghOrgInput.value = ghSettings.org;
+    if (ghSettings.projectNum) ghProjectNumInput.value = ghSettings.projectNum;
+    if (ghSettings.token) ghTokenInput.value = ghSettings.token;
 
     // Init Board
     renderBoard();
@@ -45,9 +73,41 @@ document.addEventListener('DOMContentLoaded', () => {
     taskForm.addEventListener('submit', saveTask);
     deleteTaskBtn.addEventListener('click', deleteTask);
 
+    // Import/Export Event Listeners
+    exportBtn.addEventListener('click', exportTasks);
+    importBtn.addEventListener('click', () => importFile.click());
+    importFile.addEventListener('change', importTasks);
+
+    // Filters Event Listeners
+    filterAssignee.addEventListener('input', renderBoard);
+    filterDate.addEventListener('input', renderBoard);
+    filterSprint.addEventListener('input', renderBoard);
+    clearFiltersBtn.addEventListener('click', () => {
+        filterAssignee.value = '';
+        filterDate.value = '';
+        filterSprint.value = '';
+        renderBoard();
+    });
+
+    // GitHub Event Listeners
+    githubSettingsBtn.addEventListener('click', () => { githubModal.classList.add('active'); });
+    closeGithubModalBtn.addEventListener('click', () => { githubModal.classList.remove('active'); });
+    githubForm.addEventListener('submit', (e) => {
+        e.preventDefault();
+        fetchFromGitHub();
+    });
+    pullGithubBtn.addEventListener('click', () => {
+        fetchFromGitHub();
+    });
+
     // Close modal on outside click
     modalOverlay.addEventListener('click', (e) => {
         if (e.target === modalOverlay) closeModal();
+    });
+    
+    // Close GH modal on outside click
+    githubModal.addEventListener('click', (e) => {
+        if (e.target === githubModal) githubModal.classList.remove('active');
     });
 
     function renderBoard() {
@@ -65,7 +125,19 @@ document.addEventListener('DOMContentLoaded', () => {
             'live': 0
         };
 
-        tasks.forEach(task => {
+        const fAssignee = filterAssignee.value.toLowerCase().trim();
+        const fDate = filterDate.value;
+        const fSprint = filterSprint.value.toLowerCase().trim();
+
+        const filteredTasks = tasks.filter(t => {
+            if (fAssignee && (!t.assignee || !t.assignee.toLowerCase().includes(fAssignee))) return false;
+            if (fDate && t.eta !== fDate) return false;
+            // Support partial or exact match for Sprint numbers string
+            if (fSprint && (!t.sprint || !t.sprint.toLowerCase().includes(fSprint))) return false;
+            return true;
+        });
+
+        filteredTasks.forEach(task => {
             const card = createTaskCard(task);
             const column = document.querySelector(`#col-${task.status} .kanban-cards`);
             if (column) {
@@ -119,6 +191,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.75rem;">
                 <span class="priority-badge ${task.priority ? task.priority.toLowerCase() : 'medium'}">${task.priority || 'Medium'}</span>
                 <span class="type-badge">${task.type || 'New feature'}</span>
+                ${task.sprint ? `<span class="type-badge" style="background-color: #3b82f6; color: white;">Sprint ${task.sprint}</span>` : ''}
             </div>
             <div class="card-stakeholder">From: ${task.stakeholder || 'Unknown'}</div>
             <div class="card-footer">
@@ -149,6 +222,7 @@ document.addEventListener('DOMContentLoaded', () => {
             etaInput.value = task.eta || '';
             statusInput.value = task.status;
             typeInput.value = task.type || 'New feature';
+            sprintInput.value = task.sprint || '';
             deleteTaskBtn.classList.remove('hidden');
         } else {
             modalTitle.textContent = 'Add New Task';
@@ -156,6 +230,7 @@ document.addEventListener('DOMContentLoaded', () => {
             idInput.value = '';
             statusInput.value = 'backlog';
             typeInput.value = 'New feature';
+            sprintInput.value = '146';
             deleteTaskBtn.classList.add('hidden');
         }
         
@@ -178,7 +253,8 @@ document.addEventListener('DOMContentLoaded', () => {
             datePlanned: datePlannedInput.value,
             eta: etaInput.value,
             status: statusInput.value,
-            type: typeInput.value
+            type: typeInput.value,
+            sprint: sprintInput.value.trim()
         };
 
         if (idInput.value) {
@@ -253,4 +329,169 @@ document.addEventListener('DOMContentLoaded', () => {
             e.currentTarget.classList.remove('drag-over');
         });
     });
+
+    // --- IMPORT/EXPORT LOGIC ---
+    function exportTasks() {
+        const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(tasks, null, 2));
+        const downloadAnchor = document.createElement('a');
+        downloadAnchor.setAttribute("href", dataStr);
+        downloadAnchor.setAttribute("download", "pmo_dashboard_tasks.json");
+        document.body.appendChild(downloadAnchor);
+        downloadAnchor.click();
+        downloadAnchor.remove();
+    }
+
+    function importTasks(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = function(event) {
+            try {
+                const importedTasks = JSON.parse(event.target.result);
+                if (!Array.isArray(importedTasks)) {
+                    throw new Error("Invalid format");
+                }
+                
+                if (confirm('Import successful! Do you want to wipe your current board clear before loading these tasks? (Click Cancel to just merge them together)')) {
+                    tasks = importedTasks;
+                } else {
+                    // Merge and deduplicate by title
+                    const seenTitles = new Set();
+                    const merged = [];
+                    [...tasks, ...importedTasks].forEach(t => {
+                        const lower = t.title.toLowerCase().trim();
+                        if (!seenTitles.has(lower)) {
+                            seenTitles.add(lower);
+                            merged.push(t);
+                        }
+                    });
+                    tasks = merged;
+                }
+                
+                saveAndRender();
+                alert(`Successfully loaded ${importedTasks.length} tasks!`);
+            } catch (err) {
+                alert("Error importing file! Make sure it is a valid PMO JSON backup.");
+            }
+            importFile.value = ''; // Reset file input so you can re-import same file if needed
+        };
+        reader.readAsText(file);
+    }
+
+    // --- GITHUB SYNC LOGIC ---
+
+    function saveGithubSettings() {
+        const settings = {
+            org: ghOrgInput.value.trim(),
+            projectNum: parseInt(ghProjectNumInput.value),
+            token: ghTokenInput.value.trim()
+        };
+        localStorage.setItem('gh-settings', JSON.stringify(settings));
+        return settings;
+    }
+
+    async function fetchFromGitHub() {
+        const settings = saveGithubSettings();
+        if (!settings.org || !settings.projectNum || !settings.token) return;
+        
+        pullGithubBtn.textContent = 'Syncing...';
+        
+        const query = `
+        query($org: String!, $num: Int!) {
+          organization(login: $org) {
+            projectV2(number: $num) {
+              items(first: 100) {
+                nodes {
+                  id
+                  fieldValues(first: 20) {
+                    nodes {
+                      __typename
+                      ... on ProjectV2ItemFieldTextValue { text field { ... on ProjectV2FieldCommon { name } } }
+                      ... on ProjectV2ItemFieldSingleSelectValue { name field { ... on ProjectV2FieldCommon { name } } }
+                    }
+                  }
+                  content { ... on Issue { title assignees(first: 1) { nodes { login } } } }
+                }
+              }
+            }
+          }
+        }`;
+
+        try {
+            const res = await fetch('https://api.github.com/graphql', {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${settings.token}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ query, variables: { org: settings.org, num: settings.projectNum } })
+            });
+            const data = await res.json();
+            
+            if (data.errors) {
+                alert("GitHub API Error: " + data.errors[0].message);
+                pullGithubBtn.textContent = 'Manual Sync';
+                return;
+            }
+            
+            const projectItems = data.data.organization.projectV2.items.nodes;
+            let addedCount = 0;
+            
+            projectItems.forEach(item => {
+                if (!item.content || !item.content.title) return;
+                
+                let issueTitle = item.content.title;
+                let assignee = (item.content.assignees && item.content.assignees.nodes.length > 0) ? item.content.assignees.nodes[0].login : '';
+                
+                let fields = item.fieldValues.nodes;
+                // Defaults
+                let statusVal = 'backlog';
+                let priorityVal = 'Medium';
+                
+                // Read custom fields from V2 Project
+                fields.forEach(f => {
+                    const fieldName = f.field?.name?.toLowerCase() || '';
+                    if (fieldName === 'status') {
+                        let text = (f.name || '').toLowerCase();
+                        if (text.includes('todo') || text.includes('to do')) statusVal = 'todo';
+                        else if (text.includes('progress')) statusVal = 'in-progress';
+                        else if (text.includes('qe') || text.includes('qa')) statusVal = 'in-qe';
+                        else if (text.includes('live') || text.includes('done') || text.includes('completed')) statusVal = 'live';
+                        else if (text.includes('hold')) statusVal = 'on-hold';
+                    }
+                    if (fieldName === 'priority') {
+                        if (f.name) priorityVal = f.name;
+                    }
+                });
+                
+                // Detect if task already exists on board by matching title
+                const existingIndex = tasks.findIndex(t => t.title.toLowerCase().trim() === issueTitle.toLowerCase().trim());
+                if (existingIndex >= 0) {
+                    tasks[existingIndex].status = statusVal;
+                    tasks[existingIndex].priority = priorityVal;
+                    tasks[existingIndex].assignee = assignee || tasks[existingIndex].assignee;
+                } else {
+                    tasks.push({
+                        id: 'gh-' + Date.now() + Math.random(),
+                        title: issueTitle,
+                        stakeholder: 'GitHub Sync',
+                        assignee: assignee,
+                        priority: priorityVal,
+                        datePlanned: '',
+                        eta: '',
+                        status: statusVal,
+                        type: 'New feature'
+                    });
+                    addedCount++;
+                }
+            });
+            
+            saveAndRender();
+            alert(`Sync complete! Pulled ${projectItems.length} issues and added ${addedCount} brand new tasks to the board.`);
+            githubModal.classList.remove('active');
+            
+        } catch (e) {
+            alert("Error syncing with GitHub: " + e.message);
+            console.error(e);
+        }
+        pullGithubBtn.textContent = 'Manual Sync';
+    }
 });

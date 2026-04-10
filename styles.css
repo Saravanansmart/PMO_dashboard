@@ -316,10 +316,12 @@ body {
     flex-direction: column;
     gap: 0.5rem;
     flex: 1;
+    min-width: 130px;
 }
 
 .form-row {
     display: flex;
+    flex-wrap: wrap;
     gap: 1rem;
 }
 
@@ -338,6 +340,7 @@ input, select {
     font-size: 0.95rem;
     font-family: inherit;
     transition: border-color 0.2s;
+    width: 100%;
 }
 
 input:focus, select:focus {
