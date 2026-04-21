@@ -17,6 +17,51 @@ document.addEventListener('DOMContentLoaded', () => {
         localStorage.setItem('pmo-tasks', JSON.stringify(tasks));
     }
 
+
+    const STATUS_FLOW = ['backlog', 'todo', 'in-progress', 'in-qe', 'on-hold', 'live'];
+    const PRIORITY_RANK = { high: 0, medium: 1, low: 2 };
+
+    function normalizeStatus(status) {
+        const normalized = (status || '').toString().trim().toLowerCase();
+        return STATUS_FLOW.includes(normalized) ? normalized : 'backlog';
+    }
+
+    function normalizeTask(task) {
+        const normalizedTask = { ...task };
+        normalizedTask.status = normalizeStatus(task.status);
+        normalizedTask.priority = task.priority || 'Medium';
+        normalizedTask.title = (task.title || '').trim();
+        normalizedTask.stakeholder = (task.stakeholder || '').trim();
+        normalizedTask.assignee = (task.assignee || '').trim();
+        normalizedTask.sprint = (task.sprint || '').toString().trim();
+        return normalizedTask;
+    }
+
+    function compareTasksForFlow(a, b) {
+        const priorityA = PRIORITY_RANK[(a.priority || '').toLowerCase()] ?? 99;
+        const priorityB = PRIORITY_RANK[(b.priority || '').toLowerCase()] ?? 99;
+        if (priorityA !== priorityB) return priorityA - priorityB;
+
+        if (a.eta && b.eta) return a.eta.localeCompare(b.eta);
+        if (a.eta) return -1;
+        if (b.eta) return 1;
+
+        return a.title.localeCompare(b.title);
+    }
+
+    function isValidTransition(fromStatus, toStatus) {
+        if (fromStatus === toStatus) return true;
+
+        const fromIndex = STATUS_FLOW.indexOf(fromStatus);
+        const toIndex = STATUS_FLOW.indexOf(toStatus);
+        if (fromIndex === -1 || toIndex === -1) return false;
+
+        // Allow any backward move, but only one-step forward move to keep the board flow predictable.
+        return toIndex <= fromIndex || toIndex === fromIndex + 1;
+    }
+
+    tasks = tasks.map(normalizeTask).filter(task => task.title);
+
     // DOM Elements
     const addTaskBtn = document.getElementById('add-task-btn');
     const modalOverlay = document.getElementById('task-modal');
@@ -137,6 +182,8 @@ document.addEventListener('DOMContentLoaded', () => {
             return true;
         });
 
+        filteredTasks.sort(compareTasksForFlow);
+
         filteredTasks.forEach(task => {
             const card = createTaskCard(task);
             const column = document.querySelector(`#col-${task.status} .kanban-cards`);
@@ -252,32 +299,34 @@ document.addEventListener('DOMContentLoaded', () => {
             priority: priorityInput.value,
             datePlanned: datePlannedInput.value,
             eta: etaInput.value,
-            status: statusInput.value,
+            status: normalizeStatus(statusInput.value),
             type: typeInput.value,
             sprint: sprintInput.value.trim()
         };
 
+        const normalizedTaskData = normalizeTask(taskData);
+
         if (idInput.value) {
             // Update
-            const index = tasks.findIndex(t => t.id === taskData.id);
+            const index = tasks.findIndex(t => t.id === normalizedTaskData.id);
             if (index !== -1) {
                 // Check if editing causes a duplicate
-                const isDuplicate = tasks.some(t => t.id !== taskData.id && t.title.toLowerCase().trim() === taskData.title.toLowerCase());
+                const isDuplicate = tasks.some(t => t.id !== normalizedTaskData.id && t.title.toLowerCase().trim() === normalizedTaskData.title.toLowerCase());
                 if (isDuplicate) {
                     alert('A task with this title already exists!');
                     return;
                 }
-                tasks[index] = taskData;
+                tasks[index] = normalizedTaskData;
             }
         } else {
             // Add
             // Prevent adding a new duplicate
-            const isDuplicate = tasks.some(t => t.title.toLowerCase().trim() === taskData.title.toLowerCase());
+            const isDuplicate = tasks.some(t => t.title.toLowerCase().trim() === normalizedTaskData.title.toLowerCase());
             if (isDuplicate) {
                 alert('A task with this title already exists!');
                 return;
             }
-            tasks.push(taskData);
+            tasks.push(normalizedTaskData);
         }
 
         saveAndRender();
@@ -318,6 +367,12 @@ document.addEventListener('DOMContentLoaded', () => {
             
             const taskIndex = tasks.findIndex(t => t.id === id);
             if (taskIndex !== -1 && tasks[taskIndex].status !== newStatus) {
+                const currentStatus = normalizeStatus(tasks[taskIndex].status);
+                if (!isValidTransition(currentStatus, newStatus)) {
+                    alert('Move blocked: advance tasks one stage at a time (or move backward when needed).');
+                    return;
+                }
+
                 tasks[taskIndex].status = newStatus;
                 saveAndRender();
             }
@@ -354,7 +409,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 
                 if (confirm('Import successful! Do you want to wipe your current board clear before loading these tasks? (Click Cancel to just merge them together)')) {
-                    tasks = importedTasks;
+                    tasks = importedTasks.map(normalizeTask).filter(task => task.title);
                 } else {
                     // Merge and deduplicate by title
                     const seenTitles = new Set();
@@ -363,7 +418,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         const lower = t.title.toLowerCase().trim();
                         if (!seenTitles.has(lower)) {
                             seenTitles.add(lower);
-                            merged.push(t);
+                            merged.push(normalizeTask(t));
                         }
                     });
                     tasks = merged;
@@ -465,7 +520,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 // Detect if task already exists on board by matching title
                 const existingIndex = tasks.findIndex(t => t.title.toLowerCase().trim() === issueTitle.toLowerCase().trim());
                 if (existingIndex >= 0) {
-                    tasks[existingIndex].status = statusVal;
+                    tasks[existingIndex].status = normalizeStatus(statusVal);
                     tasks[existingIndex].priority = priorityVal;
                     tasks[existingIndex].assignee = assignee || tasks[existingIndex].assignee;
                 } else {
@@ -477,7 +532,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         priority: priorityVal,
                         datePlanned: '',
                         eta: '',
-                        status: statusVal,
+                        status: normalizeStatus(statusVal),
                         type: 'New feature'
                     });
                     addedCount++;
