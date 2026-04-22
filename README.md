@@ -23,7 +23,7 @@ A lightweight single-page Kanban dashboard for PMO teams to track work from back
     - Filtering and rendering logic
     - Card drag/drop status movement
     - Import/export JSON backups
-    - GitHub GraphQL sync from Project V2
+    - GitHub Issues sync from repository API
 
 ## Runtime data flow
 
