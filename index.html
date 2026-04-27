@@ -158,23 +158,23 @@
     <div id="github-modal" class="modal-overlay">
         <div class="modal">
             <div class="modal-header">
-                <h2>GitHub Project Sync Settings</h2>
+                <h2>GitHub Issues Sync Settings</h2>
                 <button id="close-github-modal-btn" class="close-btn">&times;</button>
             </div>
             <form id="github-form">
                 <div class="form-group">
-                    <label for="gh-org">Organization Name</label>
-                    <input type="text" id="gh-org" required placeholder="e.g. Vakilsearch">
+                    <label for="gh-owner">Repository Owner</label>
+                    <input type="text" id="gh-owner" required placeholder="e.g. Vakilsearch">
                 </div>
                 <div class="form-group">
-                    <label for="gh-project-num">Project Number</label>
-                    <input type="number" id="gh-project-num" required placeholder="e.g. 2">
-                    <small style="color:var(--text-muted); font-size:0.75rem;">(Found in your Project URL: orgs/.../projects/2)</small>
+                    <label for="gh-repo">Repository Name</label>
+                    <input type="text" id="gh-repo" required placeholder="e.g. PMO_dashboard">
+                    <small style="color:var(--text-muted); font-size:0.75rem;">(This pulls issues from https://github.com/&lt;owner&gt;/&lt;repo&gt;/issues)</small>
                 </div>
                 <div class="form-group">
                     <label for="gh-token">Personal Access Token (PAT)</label>
                     <input type="password" id="gh-token" required placeholder="ghp_xxxxxxxxxxxxxxxxxxx">
-                    <small style="color:var(--text-muted); font-size:0.75rem;">Requires exactly the 'project' or 'read:project' scope.</small>
+                    <small style="color:var(--text-muted); font-size:0.75rem;">Requires repo read access (classic: repo, fine-grained: Issues read).</small>
                 </div>
                 <div class="modal-actions">
                     <button type="submit" class="primary-btn" id="save-github-btn">Save & Sync</button>

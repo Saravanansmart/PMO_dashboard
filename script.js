@@ -17,6 +17,51 @@ document.addEventListener('DOMContentLoaded', () => {
         localStorage.setItem('pmo-tasks', JSON.stringify(tasks));
     }
 
+
+    const STATUS_FLOW = ['backlog', 'todo', 'in-progress', 'in-qe', 'on-hold', 'live'];
+    const PRIORITY_RANK = { high: 0, medium: 1, low: 2 };
+
+    function normalizeStatus(status) {
+        const normalized = (status || '').toString().trim().toLowerCase();
+        return STATUS_FLOW.includes(normalized) ? normalized : 'backlog';
+    }
+
+    function normalizeTask(task) {
+        const normalizedTask = { ...task };
+        normalizedTask.status = normalizeStatus(task.status);
+        normalizedTask.priority = task.priority || 'Medium';
+        normalizedTask.title = (task.title || '').trim();
+        normalizedTask.stakeholder = (task.stakeholder || '').trim();
+        normalizedTask.assignee = (task.assignee || '').trim();
+        normalizedTask.sprint = (task.sprint || '').toString().trim();
+        return normalizedTask;
+    }
+
+    function compareTasksForFlow(a, b) {
+        const priorityA = PRIORITY_RANK[(a.priority || '').toLowerCase()] ?? 99;
+        const priorityB = PRIORITY_RANK[(b.priority || '').toLowerCase()] ?? 99;
+        if (priorityA !== priorityB) return priorityA - priorityB;
+
+        if (a.eta && b.eta) return a.eta.localeCompare(b.eta);
+        if (a.eta) return -1;
+        if (b.eta) return 1;
+
+        return a.title.localeCompare(b.title);
+    }
+
+    function isValidTransition(fromStatus, toStatus) {
+        if (fromStatus === toStatus) return true;
+
+        const fromIndex = STATUS_FLOW.indexOf(fromStatus);
+        const toIndex = STATUS_FLOW.indexOf(toStatus);
+        if (fromIndex === -1 || toIndex === -1) return false;
+
+        // Allow any backward move, but only one-step forward move to keep the board flow predictable.
+        return toIndex <= fromIndex || toIndex === fromIndex + 1;
+    }
+
+    tasks = tasks.map(normalizeTask).filter(task => task.title);
+
     // DOM Elements
     const addTaskBtn = document.getElementById('add-task-btn');
     const modalOverlay = document.getElementById('task-modal');
@@ -53,15 +98,15 @@ document.addEventListener('DOMContentLoaded', () => {
     const githubModal = document.getElementById('github-modal');
     const closeGithubModalBtn = document.getElementById('close-github-modal-btn');
     const githubForm = document.getElementById('github-form');
-    const ghOrgInput = document.getElementById('gh-org');
-    const ghProjectNumInput = document.getElementById('gh-project-num');
+    const ghOwnerInput = document.getElementById('gh-owner');
+    const ghRepoInput = document.getElementById('gh-repo');
     const ghTokenInput = document.getElementById('gh-token');
     const pullGithubBtn = document.getElementById('pull-github-btn');
     
     // Load existing settings
     const ghSettings = JSON.parse(localStorage.getItem('gh-settings') || '{}');
-    if (ghSettings.org) ghOrgInput.value = ghSettings.org;
-    if (ghSettings.projectNum) ghProjectNumInput.value = ghSettings.projectNum;
+    if (ghSettings.owner) ghOwnerInput.value = ghSettings.owner;
+    if (ghSettings.repo) ghRepoInput.value = ghSettings.repo;
     if (ghSettings.token) ghTokenInput.value = ghSettings.token;
 
     // Init Board
@@ -136,6 +181,8 @@ document.addEventListener('DOMContentLoaded', () => {
             if (fSprint && (!t.sprint || !t.sprint.toLowerCase().includes(fSprint))) return false;
             return true;
         });
+
+        filteredTasks.sort(compareTasksForFlow);
 
         filteredTasks.forEach(task => {
             const card = createTaskCard(task);
@@ -252,32 +299,34 @@ document.addEventListener('DOMContentLoaded', () => {
             priority: priorityInput.value,
             datePlanned: datePlannedInput.value,
             eta: etaInput.value,
-            status: statusInput.value,
+            status: normalizeStatus(statusInput.value),
             type: typeInput.value,
             sprint: sprintInput.value.trim()
         };
 
+        const normalizedTaskData = normalizeTask(taskData);
+
         if (idInput.value) {
             // Update
-            const index = tasks.findIndex(t => t.id === taskData.id);
+            const index = tasks.findIndex(t => t.id === normalizedTaskData.id);
             if (index !== -1) {
                 // Check if editing causes a duplicate
-                const isDuplicate = tasks.some(t => t.id !== taskData.id && t.title.toLowerCase().trim() === taskData.title.toLowerCase());
+                const isDuplicate = tasks.some(t => t.id !== normalizedTaskData.id && t.title.toLowerCase().trim() === normalizedTaskData.title.toLowerCase());
                 if (isDuplicate) {
                     alert('A task with this title already exists!');
                     return;
                 }
-                tasks[index] = taskData;
+                tasks[index] = normalizedTaskData;
             }
         } else {
             // Add
             // Prevent adding a new duplicate
-            const isDuplicate = tasks.some(t => t.title.toLowerCase().trim() === taskData.title.toLowerCase());
+            const isDuplicate = tasks.some(t => t.title.toLowerCase().trim() === normalizedTaskData.title.toLowerCase());
             if (isDuplicate) {
                 alert('A task with this title already exists!');
                 return;
             }
-            tasks.push(taskData);
+            tasks.push(normalizedTaskData);
         }
 
         saveAndRender();
@@ -318,6 +367,12 @@ document.addEventListener('DOMContentLoaded', () => {
             
             const taskIndex = tasks.findIndex(t => t.id === id);
             if (taskIndex !== -1 && tasks[taskIndex].status !== newStatus) {
+                const currentStatus = normalizeStatus(tasks[taskIndex].status);
+                if (!isValidTransition(currentStatus, newStatus)) {
+                    alert('Move blocked: advance tasks one stage at a time (or move backward when needed).');
+                    return;
+                }
+
                 tasks[taskIndex].status = newStatus;
                 saveAndRender();
             }
@@ -332,10 +387,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- IMPORT/EXPORT LOGIC ---
     function exportTasks() {
-        const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(tasks, null, 2));
+        const payload = {
+            exportedAt: new Date().toISOString(),
+            version: 1,
+            tasks
+        };
+        const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(payload, null, 2));
         const downloadAnchor = document.createElement('a');
         downloadAnchor.setAttribute("href", dataStr);
-        downloadAnchor.setAttribute("download", "pmo_dashboard_tasks.json");
+        downloadAnchor.setAttribute("download", `pmo_dashboard_tasks_${new Date().toISOString().slice(0, 10)}.json`);
         document.body.appendChild(downloadAnchor);
         downloadAnchor.click();
         downloadAnchor.remove();
@@ -348,29 +408,33 @@ document.addEventListener('DOMContentLoaded', () => {
         const reader = new FileReader();
         reader.onload = function(event) {
             try {
-                const importedTasks = JSON.parse(event.target.result);
-                if (!Array.isArray(importedTasks)) {
+                const importedPayload = JSON.parse(event.target.result);
+                const importedTasks = Array.isArray(importedPayload)
+                    ? importedPayload
+                    : (Array.isArray(importedPayload.tasks) ? importedPayload.tasks : null);
+                if (!importedTasks) {
                     throw new Error("Invalid format");
                 }
-                
-                if (confirm('Import successful! Do you want to wipe your current board clear before loading these tasks? (Click Cancel to just merge them together)')) {
-                    tasks = importedTasks;
+
+                const cleanImportedTasks = importedTasks.map(normalizeTask).filter(task => task.title);
+
+                if (confirm('Import successful! Do you want to wipe your current board clear before loading these tasks? (Click Cancel to merge)')) {
+                    tasks = cleanImportedTasks;
                 } else {
-                    // Merge and deduplicate by title
-                    const seenTitles = new Set();
+                    const seenKeys = new Set();
                     const merged = [];
-                    [...tasks, ...importedTasks].forEach(t => {
-                        const lower = t.title.toLowerCase().trim();
-                        if (!seenTitles.has(lower)) {
-                            seenTitles.add(lower);
-                            merged.push(t);
+                    [...tasks, ...cleanImportedTasks].forEach(t => {
+                        const key = t.githubIssueId ? `gh-${t.githubIssueId}` : t.title.toLowerCase().trim();
+                        if (!seenKeys.has(key)) {
+                            seenKeys.add(key);
+                            merged.push(normalizeTask(t));
                         }
                     });
                     tasks = merged;
                 }
                 
                 saveAndRender();
-                alert(`Successfully loaded ${importedTasks.length} tasks!`);
+                alert(`Successfully loaded ${cleanImportedTasks.length} tasks!`);
             } catch (err) {
                 alert("Error importing file! Make sure it is a valid PMO JSON backup.");
             }
@@ -383,115 +447,117 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function saveGithubSettings() {
         const settings = {
-            org: ghOrgInput.value.trim(),
-            projectNum: parseInt(ghProjectNumInput.value),
+            owner: ghOwnerInput.value.trim(),
+            repo: ghRepoInput.value.trim(),
             token: ghTokenInput.value.trim()
         };
         localStorage.setItem('gh-settings', JSON.stringify(settings));
         return settings;
     }
 
+    function mapIssueStateToStatus(issue) {
+        if (issue.state === 'closed') return 'live';
+
+        const labels = (issue.labels || []).map(label => (label.name || '').toLowerCase());
+        if (labels.some(label => label.includes('in progress') || label.includes('in-progress'))) return 'in-progress';
+        if (labels.some(label => label.includes('todo') || label.includes('to do'))) return 'todo';
+        if (labels.some(label => label.includes('qe') || label.includes('qa') || label.includes('testing'))) return 'in-qe';
+        if (labels.some(label => label.includes('hold') || label.includes('blocked'))) return 'on-hold';
+        if (labels.some(label => label.includes('done') || label.includes('live'))) return 'live';
+
+        return 'backlog';
+    }
+
+    function mapIssuePriority(issue) {
+        const labels = (issue.labels || []).map(label => (label.name || '').toLowerCase());
+        if (labels.some(label => label.includes('high') || label.includes('p0') || label.includes('p1'))) return 'High';
+        if (labels.some(label => label.includes('low') || label.includes('p3') || label.includes('p4'))) return 'Low';
+        return 'Medium';
+    }
+
     async function fetchFromGitHub() {
         const settings = saveGithubSettings();
-        if (!settings.org || !settings.projectNum || !settings.token) return;
-        
+        if (!settings.owner || !settings.repo || !settings.token) {
+            alert('Please fill Repository Owner, Repository Name, and Token before syncing.');
+            return;
+        }
+
         pullGithubBtn.textContent = 'Syncing...';
-        
-        const query = `
-        query($org: String!, $num: Int!) {
-          organization(login: $org) {
-            projectV2(number: $num) {
-              items(first: 100) {
-                nodes {
-                  id
-                  fieldValues(first: 20) {
-                    nodes {
-                      __typename
-                      ... on ProjectV2ItemFieldTextValue { text field { ... on ProjectV2FieldCommon { name } } }
-                      ... on ProjectV2ItemFieldSingleSelectValue { name field { ... on ProjectV2FieldCommon { name } } }
-                    }
-                  }
-                  content { ... on Issue { title assignees(first: 1) { nodes { login } } } }
-                }
-              }
-            }
-          }
-        }`;
+        pullGithubBtn.disabled = true;
 
         try {
-            const res = await fetch('https://api.github.com/graphql', {
-                method: 'POST',
-                headers: { 'Authorization': `Bearer ${settings.token}`, 'Content-Type': 'application/json' },
-                body: JSON.stringify({ query, variables: { org: settings.org, num: settings.projectNum } })
+            const res = await fetch(`https://api.github.com/repos/${settings.owner}/${settings.repo}/issues?state=all&per_page=100`, {
+                headers: {
+                    'Authorization': `Bearer ${settings.token}`,
+                    'Accept': 'application/vnd.github+json'
+                }
             });
-            const data = await res.json();
-            
-            if (data.errors) {
-                alert("GitHub API Error: " + data.errors[0].message);
-                pullGithubBtn.textContent = 'Manual Sync';
-                return;
+
+            if (!res.ok) {
+                const errData = await res.json().catch(() => ({}));
+                throw new Error(errData.message || `GitHub API returned ${res.status}`);
             }
-            
-            const projectItems = data.data.organization.projectV2.items.nodes;
+
+            const issues = await res.json();
+            const issueItems = issues.filter(issue => !issue.pull_request);
             let addedCount = 0;
-            
-            projectItems.forEach(item => {
-                if (!item.content || !item.content.title) return;
-                
-                let issueTitle = item.content.title;
-                let assignee = (item.content.assignees && item.content.assignees.nodes.length > 0) ? item.content.assignees.nodes[0].login : '';
-                
-                let fields = item.fieldValues.nodes;
-                // Defaults
-                let statusVal = 'backlog';
-                let priorityVal = 'Medium';
-                
-                // Read custom fields from V2 Project
-                fields.forEach(f => {
-                    const fieldName = f.field?.name?.toLowerCase() || '';
-                    if (fieldName === 'status') {
-                        let text = (f.name || '').toLowerCase();
-                        if (text.includes('todo') || text.includes('to do')) statusVal = 'todo';
-                        else if (text.includes('progress')) statusVal = 'in-progress';
-                        else if (text.includes('qe') || text.includes('qa')) statusVal = 'in-qe';
-                        else if (text.includes('live') || text.includes('done') || text.includes('completed')) statusVal = 'live';
-                        else if (text.includes('hold')) statusVal = 'on-hold';
-                    }
-                    if (fieldName === 'priority') {
-                        if (f.name) priorityVal = f.name;
-                    }
-                });
-                
-                // Detect if task already exists on board by matching title
-                const existingIndex = tasks.findIndex(t => t.title.toLowerCase().trim() === issueTitle.toLowerCase().trim());
+            let updatedCount = 0;
+
+            issueItems.forEach(issue => {
+                const issueTitle = (issue.title || '').trim();
+                if (!issueTitle) return;
+
+                const assignee = issue.assignee?.login || '';
+                const statusVal = normalizeStatus(mapIssueStateToStatus(issue));
+                const priorityVal = mapIssuePriority(issue);
+
+                const existingIndex = tasks.findIndex(t =>
+                    t.githubIssueId === issue.id ||
+                    t.title.toLowerCase().trim() === issueTitle.toLowerCase()
+                );
                 if (existingIndex >= 0) {
-                    tasks[existingIndex].status = statusVal;
-                    tasks[existingIndex].priority = priorityVal;
-                    tasks[existingIndex].assignee = assignee || tasks[existingIndex].assignee;
-                } else {
-                    tasks.push({
-                        id: 'gh-' + Date.now() + Math.random(),
+                    tasks[existingIndex] = normalizeTask({
+                        ...tasks[existingIndex],
                         title: issueTitle,
-                        stakeholder: 'GitHub Sync',
+                        stakeholder: tasks[existingIndex].stakeholder || 'GitHub Issues',
+                        assignee: assignee || tasks[existingIndex].assignee,
+                        priority: priorityVal,
+                        status: statusVal,
+                        type: 'GitHub Issue',
+                        githubIssueId: issue.id,
+                        githubIssueNumber: issue.number,
+                        githubIssueUrl: issue.html_url
+                    });
+                    updatedCount++;
+                } else {
+                    tasks.push(normalizeTask({
+                        id: `gh-${issue.id}`,
+                        title: issueTitle,
+                        stakeholder: 'GitHub Issues',
                         assignee: assignee,
                         priority: priorityVal,
                         datePlanned: '',
                         eta: '',
                         status: statusVal,
-                        type: 'New feature'
-                    });
+                        type: 'GitHub Issue',
+                        sprint: '',
+                        githubIssueId: issue.id,
+                        githubIssueNumber: issue.number,
+                        githubIssueUrl: issue.html_url
+                    }));
                     addedCount++;
                 }
             });
             
             saveAndRender();
-            alert(`Sync complete! Pulled ${projectItems.length} issues and added ${addedCount} brand new tasks to the board.`);
+            alert(`Sync complete! Processed ${issueItems.length} issues, added ${addedCount}, updated ${updatedCount}.`);
             githubModal.classList.remove('active');
-            
         } catch (e) {
-            alert("Error syncing with GitHub: " + e.message);
+            alert("Error syncing with GitHub Issues: " + e.message);
             console.error(e);
+        } finally {
+            pullGithubBtn.textContent = 'Manual Sync';
+            pullGithubBtn.disabled = false;
         }
-        pullGithubBtn.textContent = 'Manual Sync';
     }
 });
