@@ -41,6 +41,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const filterAssignee = document.getElementById('filter-assignee');
     const filterDate = document.getElementById('filter-date');
     const filterSprint = document.getElementById('filter-sprint');
+    const filterSearch = document.getElementById('filter-search');
     const clearFiltersBtn = document.getElementById('clear-filters-btn');
 
     // Import/Export Elements
@@ -65,6 +66,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (ghSettings.token) ghTokenInput.value = ghSettings.token;
 
     // Init Board
+    populateDropdowns();
     renderBoard();
 
     // Event Listeners
@@ -82,10 +84,12 @@ document.addEventListener('DOMContentLoaded', () => {
     filterAssignee.addEventListener('input', renderBoard);
     filterDate.addEventListener('input', renderBoard);
     filterSprint.addEventListener('input', renderBoard);
+    filterSearch.addEventListener('input', renderBoard);
     clearFiltersBtn.addEventListener('click', () => {
         filterAssignee.value = '';
         filterDate.value = '';
         filterSprint.value = '';
+        filterSearch.value = '';
         renderBoard();
     });
 
@@ -128,12 +132,20 @@ document.addEventListener('DOMContentLoaded', () => {
         const fAssignee = filterAssignee.value.toLowerCase().trim();
         const fDate = filterDate.value;
         const fSprint = filterSprint.value.toLowerCase().trim();
+        const fSearch = filterSearch.value.toLowerCase().trim();
 
         const filteredTasks = tasks.filter(t => {
             if (fAssignee && (!t.assignee || !t.assignee.toLowerCase().includes(fAssignee))) return false;
             if (fDate && t.eta !== fDate) return false;
             // Support partial or exact match for Sprint numbers string
             if (fSprint && (!t.sprint || !t.sprint.toLowerCase().includes(fSprint))) return false;
+            
+            // Search all text fields
+            if (fSearch) {
+                const searchString = `${t.title} ${t.stakeholder} ${t.assignee} ${t.sprint} ${t.type}`.toLowerCase();
+                if (!searchString.includes(fSearch)) return false;
+            }
+            
             return true;
         });
 
@@ -241,8 +253,15 @@ document.addEventListener('DOMContentLoaded', () => {
         modalOverlay.classList.remove('active');
     }
 
-    function saveTask(e) {
+    async function saveTask(e) {
         e.preventDefault();
+        
+        const saveBtn = document.getElementById('save-task-btn');
+        const origText = saveBtn.textContent;
+        saveBtn.textContent = 'Saving...';
+        saveBtn.disabled = true;
+
+        let existingTask = idInput.value ? tasks.find(t => t.id === idInput.value) : null;
         
         const taskData = {
             id: idInput.value || Date.now().toString(),
@@ -254,7 +273,9 @@ document.addEventListener('DOMContentLoaded', () => {
             eta: etaInput.value,
             status: statusInput.value,
             type: typeInput.value,
-            sprint: sprintInput.value.trim()
+            sprint: sprintInput.value.trim(),
+            ghItemId: existingTask ? existingTask.ghItemId : null,
+            ghContentId: existingTask ? existingTask.ghContentId : null
         };
 
         if (idInput.value) {
@@ -265,9 +286,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 const isDuplicate = tasks.some(t => t.id !== taskData.id && t.title.toLowerCase().trim() === taskData.title.toLowerCase());
                 if (isDuplicate) {
                     alert('A task with this title already exists!');
+                    saveBtn.textContent = origText;
+                    saveBtn.disabled = false;
                     return;
                 }
                 tasks[index] = taskData;
+                await syncTaskToGitHub(tasks[index]);
             }
         } else {
             // Add
@@ -275,13 +299,18 @@ document.addEventListener('DOMContentLoaded', () => {
             const isDuplicate = tasks.some(t => t.title.toLowerCase().trim() === taskData.title.toLowerCase());
             if (isDuplicate) {
                 alert('A task with this title already exists!');
+                saveBtn.textContent = origText;
+                saveBtn.disabled = false;
                 return;
             }
             tasks.push(taskData);
+            await syncTaskToGitHub(taskData);
         }
 
         saveAndRender();
         closeModal();
+        saveBtn.textContent = origText;
+        saveBtn.disabled = false;
     }
 
     function deleteTask() {
@@ -304,7 +333,7 @@ document.addEventListener('DOMContentLoaded', () => {
         ev.currentTarget.classList.add('drag-over');
     }
 
-    window.drop = function(ev) {
+    window.drop = async function(ev) {
         ev.preventDefault();
         
         document.querySelectorAll('.kanban-cards').forEach(el => {
@@ -320,6 +349,8 @@ document.addEventListener('DOMContentLoaded', () => {
             if (taskIndex !== -1 && tasks[taskIndex].status !== newStatus) {
                 tasks[taskIndex].status = newStatus;
                 saveAndRender();
+                // Sync status to GitHub in the background
+                syncTaskToGitHub(tasks[taskIndex]).then(() => saveAndRender());
             }
         }
     };
@@ -381,6 +412,206 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- GITHUB SYNC LOGIC ---
 
+    async function getUserId(login, token) {
+        if (!login) return null;
+        let cache = JSON.parse(localStorage.getItem('gh-users') || '{}');
+        if (cache[login]) return cache[login];
+
+        const query = `query($login: String!) { user(login: $login) { id } }`;
+        try {
+            const res = await fetch('https://api.github.com/graphql', {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ query, variables: { login } })
+            });
+            const data = await res.json();
+            if (data.data?.user?.id) {
+                cache[login] = data.data.user.id;
+                localStorage.setItem('gh-users', JSON.stringify(cache));
+                return data.data.user.id;
+            }
+        } catch (e) {}
+        return null;
+    }
+
+    async function fetchGitHubMeta(settings) {
+        const query = `
+        query($org: String!, $num: Int!) {
+          organization(login: $org) {
+            projectV2(number: $num) {
+              id
+              fields(first: 20) {
+                nodes {
+                  ... on ProjectV2FieldCommon { id name }
+                  ... on ProjectV2SingleSelectField { id name options { id name } }
+                }
+              }
+            }
+          }
+        }`;
+        try {
+            const res = await fetch('https://api.github.com/graphql', {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${settings.token}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ query, variables: { org: settings.org, num: settings.projectNum } })
+            });
+            const data = await res.json();
+            const project = data.data?.organization?.projectV2;
+            if (!project) return null;
+
+            let meta = { id: project.id, statusFieldId: null, statusOptions: {}, fields: {} };
+            project.fields.nodes.forEach(f => {
+                if (f.options) {
+                    meta.fields[f.name.toLowerCase()] = {
+                        id: f.id,
+                        name: f.name,
+                        options: f.options.map(o => ({ id: o.id, name: o.name }))
+                    };
+                }
+                if (f.name && f.name.toLowerCase() === 'status') {
+                    meta.statusFieldId = f.id;
+                    if (f.options) {
+                        f.options.forEach(opt => {
+                            let text = opt.name.toLowerCase();
+                            let key = 'backlog';
+                            if (text.includes('todo') || text.includes('to do')) key = 'todo';
+                            else if (text.includes('progress')) key = 'in-progress';
+                            else if (text.includes('qe') || text.includes('qa')) key = 'in-qe';
+                            else if (text.includes('live') || text.includes('done') || text.includes('completed')) key = 'live';
+                            else if (text.includes('hold')) key = 'on-hold';
+                            meta.statusOptions[key] = opt.id;
+                        });
+                    }
+                }
+            });
+            localStorage.setItem('gh-project-meta', JSON.stringify(meta));
+            populateDropdowns();
+            return meta;
+        } catch (e) {
+            console.error("Meta fetch error", e);
+            return null;
+        }
+    }
+
+    function populateDropdowns() {
+        const meta = JSON.parse(localStorage.getItem('gh-project-meta') || '{}');
+        if (meta.fields) {
+            // Priority
+            if (meta.fields['priority']) {
+                const prioritySelect = document.getElementById('task-priority');
+                if (prioritySelect) {
+                    const currentVal = prioritySelect.value;
+                    prioritySelect.innerHTML = meta.fields['priority'].options.map(o => `<option value="${o.name}">${o.name}</option>`).join('');
+                    if (currentVal) prioritySelect.value = currentVal;
+                }
+            }
+            // Type
+            const typeField = meta.fields['task type'] || meta.fields['type'] || meta.fields['task_type'];
+            if (typeField) {
+                const typeSelect = document.getElementById('task-type');
+                if (typeSelect) {
+                    const currentVal = typeSelect.value;
+                    typeSelect.innerHTML = typeField.options.map(o => `<option value="${o.name}">${o.name}</option>`).join('');
+                    if (currentVal) typeSelect.value = currentVal;
+                }
+            }
+        }
+        
+        // Assignees
+        const assignees = JSON.parse(localStorage.getItem('gh-assignees') || '[]');
+        const assigneeSelect = document.getElementById('task-assignee');
+        if (assigneeSelect && assigneeSelect.tagName === 'SELECT') {
+            const currentVal = assigneeSelect.value;
+            let html = `<option value="">Unassigned</option>`;
+            assignees.forEach(a => {
+                html += `<option value="${a}">${a}</option>`;
+            });
+            assigneeSelect.innerHTML = html;
+            if (currentVal) assigneeSelect.value = currentVal;
+        }
+    }
+
+    async function syncTaskToGitHub(task) {
+        const settings = saveGithubSettings();
+        if (!settings.org || !settings.projectNum || !settings.token) return;
+
+        let ghMeta = JSON.parse(localStorage.getItem('gh-project-meta') || 'null');
+        if (!ghMeta || !ghMeta.id || !ghMeta.statusFieldId) {
+            ghMeta = await fetchGitHubMeta(settings);
+            if (!ghMeta) return;
+        }
+
+        // 1. Create Draft Issue if not linked
+        if (!task.ghItemId) {
+            const createMut = `
+            mutation($projectId: ID!, $title: String!) {
+              addProjectV2DraftIssue(input: {projectId: $projectId, title: $title}) {
+                projectItem {
+                  id
+                  content { ... on DraftIssue { id } }
+                }
+              }
+            }`;
+            try {
+                const res = await fetch('https://api.github.com/graphql', {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${settings.token}`, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query: createMut, variables: { projectId: ghMeta.id, title: task.title } })
+                });
+                const data = await res.json();
+                const newItem = data.data?.addProjectV2DraftIssue?.projectItem;
+                if (newItem?.id) {
+                    task.ghItemId = newItem.id;
+                    task.ghContentId = newItem.content?.id;
+                }
+            } catch (e) {
+                console.error("Error creating draft issue", e);
+                return;
+            }
+        }
+
+        if (!task.ghItemId) return;
+
+        // 2. Sync Status
+        if (ghMeta.statusFieldId && task.status) {
+            let optionId = ghMeta.statusOptions[task.status];
+            if (optionId) {
+                const statusMut = `
+                mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
+                  updateProjectV2ItemFieldValue(input: {
+                    projectId: $projectId,
+                    itemId: $itemId,
+                    fieldId: $fieldId,
+                    value: { singleSelectOptionId: $optionId }
+                  }) { projectV2Item { id } }
+                }`;
+                await fetch('https://api.github.com/graphql', {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${settings.token}`, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query: statusMut, variables: { projectId: ghMeta.id, itemId: task.ghItemId, fieldId: ghMeta.statusFieldId, optionId: optionId } })
+                });
+            }
+        }
+
+        // 3. Sync Assignee
+        if (task.assignee && task.ghContentId) {
+            let userId = await getUserId(task.assignee, settings.token);
+            if (userId) {
+                const assignMut = `
+                mutation($assignableId: ID!, $assigneeIds: [ID!]!) {
+                  addAssigneesToAssignable(input: {assignableId: $assignableId, assigneeIds: $assigneeIds}) {
+                    clientMutationId
+                  }
+                }`;
+                await fetch('https://api.github.com/graphql', {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${settings.token}`, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query: assignMut, variables: { assignableId: task.ghContentId, assigneeIds: [userId] } })
+                });
+            }
+        }
+    }
+
     function saveGithubSettings() {
         const settings = {
             org: ghOrgInput.value.trim(),
@@ -400,7 +631,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const query = `
         query($org: String!, $num: Int!) {
           organization(login: $org) {
+            membersWithRole(first: 100) {
+              nodes {
+                login
+              }
+            }
             projectV2(number: $num) {
+              id
               items(first: 100) {
                 nodes {
                   id
@@ -409,9 +646,14 @@ document.addEventListener('DOMContentLoaded', () => {
                       __typename
                       ... on ProjectV2ItemFieldTextValue { text field { ... on ProjectV2FieldCommon { name } } }
                       ... on ProjectV2ItemFieldSingleSelectValue { name field { ... on ProjectV2FieldCommon { name } } }
+                      ... on ProjectV2ItemFieldUserValue { users(first: 1) { nodes { login } } field { ... on ProjectV2FieldCommon { name } } }
                     }
                   }
-                  content { ... on Issue { title assignees(first: 1) { nodes { login } } } }
+                  content { 
+                    ... on Issue { id title assignees(first: 1) { nodes { login } } } 
+                    ... on PullRequest { id title assignees(first: 1) { nodes { login } } }
+                    ... on DraftIssue { id title assignees(first: 1) { nodes { login } } }
+                  }
                 }
               }
             }
@@ -432,8 +674,23 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
             
-            const projectItems = data.data.organization.projectV2.items.nodes;
+            const projectV2 = data.data.organization.projectV2;
+            const projectItems = projectV2.items.nodes;
+            
+            // Save project node ID for later mutations
+            const meta = JSON.parse(localStorage.getItem('gh-project-meta') || '{}');
+            meta.id = projectV2.id;
+            localStorage.setItem('gh-project-meta', JSON.stringify(meta));
+
             let addedCount = 0;
+            let uniqueAssignees = new Set(JSON.parse(localStorage.getItem('gh-assignees') || '[]'));
+            
+            // Import org members as assignees
+            if (data.data.organization.membersWithRole) {
+                data.data.organization.membersWithRole.nodes.forEach(member => {
+                    if (member.login) uniqueAssignees.add(member.login);
+                });
+            }
             
             projectItems.forEach(item => {
                 if (!item.content || !item.content.title) return;
@@ -456,18 +713,27 @@ document.addEventListener('DOMContentLoaded', () => {
                         else if (text.includes('qe') || text.includes('qa')) statusVal = 'in-qe';
                         else if (text.includes('live') || text.includes('done') || text.includes('completed')) statusVal = 'live';
                         else if (text.includes('hold')) statusVal = 'on-hold';
+                        else if (text.includes('backlog')) statusVal = 'backlog';
                     }
                     if (fieldName === 'priority') {
                         if (f.name) priorityVal = f.name;
                     }
+                    if (fieldName === 'assignees' || fieldName === 'assignee') {
+                        if (f.users && f.users.nodes.length > 0 && !assignee) {
+                            assignee = f.users.nodes[0].login;
+                        }
+                    }
                 });
+                if (assignee) uniqueAssignees.add(assignee);
                 
                 // Detect if task already exists on board by matching title
                 const existingIndex = tasks.findIndex(t => t.title.toLowerCase().trim() === issueTitle.toLowerCase().trim());
                 if (existingIndex >= 0) {
-                    tasks[existingIndex].status = statusVal;
+                    tasks[existingIndex].status = statusVal; // Strict matching
                     tasks[existingIndex].priority = priorityVal;
-                    tasks[existingIndex].assignee = assignee || tasks[existingIndex].assignee;
+                    tasks[existingIndex].assignee = assignee; // Strict matching, overrides with empty if unassigned in Git
+                    tasks[existingIndex].ghItemId = item.id;
+                    if (item.content.id) tasks[existingIndex].ghContentId = item.content.id;
                 } else {
                     tasks.push({
                         id: 'gh-' + Date.now() + Math.random(),
@@ -478,14 +744,27 @@ document.addEventListener('DOMContentLoaded', () => {
                         datePlanned: '',
                         eta: '',
                         status: statusVal,
-                        type: 'New feature'
+                        type: 'New feature',
+                        ghItemId: item.id,
+                        ghContentId: item.content?.id
                     });
                     addedCount++;
                 }
             });
             
+            // Push any local tasks that don't exist in GitHub yet
+            let pushedCount = 0;
+            for (let i = 0; i < tasks.length; i++) {
+                if (!tasks[i].ghItemId) {
+                    await syncTaskToGitHub(tasks[i]);
+                    pushedCount++;
+                }
+            }
+
+            localStorage.setItem('gh-assignees', JSON.stringify(Array.from(uniqueAssignees)));
+            populateDropdowns();
             saveAndRender();
-            alert(`Sync complete! Pulled ${projectItems.length} issues and added ${addedCount} brand new tasks to the board.`);
+            alert(`Sync complete! Pulled ${projectItems.length} items. Added ${addedCount} brand new tasks. Pushed ${pushedCount} local tasks to GitHub.`);
             githubModal.classList.remove('active');
             
         } catch (e) {
