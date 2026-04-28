@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -10,24 +11,30 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="styles.css">
 </head>
+
 <body>
     <header class="dashboard-header">
         <div class="header-content">
             <h1>PMO Dashboard</h1>
             <div style="display: flex; gap: 1rem;">
-                <button id="import-btn" class="danger-btn" style="border-color: #64748b; color: #cbd5e1;">Import 📥</button>
-                <button id="export-btn" class="danger-btn" style="border-color: #64748b; color: #cbd5e1;">Export 📤</button>
+                <button id="import-btn" class="danger-btn" style="border-color: #64748b; color: #cbd5e1;">Import
+                    📥</button>
+                <button id="export-btn" class="danger-btn" style="border-color: #64748b; color: #cbd5e1;">Export
+                    📤</button>
                 <input type="file" id="import-file" accept=".json" class="hidden">
-                <button id="github-settings-btn" class="danger-btn" style="border-color: #64748b; color: #cbd5e1;">GitHub Sync ⚙️</button>
+                <button id="github-settings-btn" class="danger-btn"
+                    style="border-color: #64748b; color: #cbd5e1;">GitHub Sync ⚙️</button>
                 <button id="add-task-btn" class="primary-btn">+ New Task</button>
             </div>
         </div>
     </header>
 
-    <div class="filters-bar" style="padding: 1rem 2rem; background-color: var(--board-bg); border-bottom: 1px solid var(--border-color); display: flex; gap: 1.5rem; align-items: center; flex-wrap: wrap;">
+    <div class="filters-bar"
+        style="padding: 1rem 2rem; background-color: var(--board-bg); border-bottom: 1px solid var(--border-color); display: flex; gap: 1.5rem; align-items: center; flex-wrap: wrap;">
         <div style="display: flex; align-items: center; gap: 0.5rem;">
             <label for="filter-assignee" style="font-size: 0.85rem;">Assignee</label>
-            <input type="text" id="filter-assignee" placeholder="e.g. Jane" style="padding: 0.4rem 0.8rem; font-size: 0.85rem; width: 130px;">
+            <input type="text" id="filter-assignee" placeholder="e.g. Jane"
+                style="padding: 0.4rem 0.8rem; font-size: 0.85rem; width: 130px;">
         </div>
         <div style="display: flex; align-items: center; gap: 0.5rem;">
             <label for="filter-date" style="font-size: 0.85rem;">Due Date</label>
@@ -35,9 +42,15 @@
         </div>
         <div style="display: flex; align-items: center; gap: 0.5rem;">
             <label for="filter-sprint" style="font-size: 0.85rem;">Sprint</label>
-            <input type="text" id="filter-sprint" placeholder="146" style="padding: 0.4rem 0.8rem; font-size: 0.85rem; width: 100px;">
+            <input type="text" id="filter-sprint" placeholder="146"
+                style="padding: 0.4rem 0.8rem; font-size: 0.85rem; width: 100px;">
         </div>
-        <button id="clear-filters-btn" class="danger-btn" style="padding: 0.4rem 0.8rem; font-size: 0.85rem;">Clear Filters</button>
+        <div style="display: flex; align-items: center; gap: 0.5rem; margin-left: auto;">
+            <input type="text" id="filter-search" placeholder="Search tasks..."
+                style="padding: 0.4rem 0.8rem; font-size: 0.85rem; width: 200px; border-radius: 4px; border: 1px solid var(--border-color); background-color: var(--card-bg); color: var(--text-color);">
+        </div>
+        <button id="clear-filters-btn" class="danger-btn" style="padding: 0.4rem 0.8rem; font-size: 0.85rem;">Clear
+            Filters</button>
     </div>
 
     <main class="kanban-board">
@@ -61,7 +74,7 @@
             <h2 class="column-header">In QE <span class="task-count">0</span></h2>
             <div class="kanban-cards" ondrop="drop(event)" ondragover="allowDrop(event)"></div>
         </div>
-        
+
         <div class="kanban-column" id="col-on-hold" data-status="on-hold">
             <h2 class="column-header">On Hold <span class="task-count">0</span></h2>
             <div class="kanban-cards" ondrop="drop(event)" ondragover="allowDrop(event)"></div>
@@ -82,12 +95,12 @@
             </div>
             <form id="task-form">
                 <input type="hidden" id="task-id">
-                
+
                 <div class="form-group">
                     <label for="task-title">Task Title</label>
                     <input type="text" id="task-title" required placeholder="e.g. Implement Oauth2">
                 </div>
-                
+
                 <div class="form-group">
                     <label for="task-stakeholder">Stakeholder</label>
                     <input type="text" id="task-stakeholder" required placeholder="e.g. Marketing, Product">
@@ -96,7 +109,9 @@
                 <div class="form-row">
                     <div class="form-group">
                         <label for="task-assignee">Assignee</label>
-                        <input type="text" id="task-assignee" placeholder="e.g. Jane Doe">
+                        <select id="task-assignee">
+                            <option value="">Unassigned</option>
+                        </select>
                     </div>
                     <div class="form-group">
                         <label for="task-priority">Priority</label>
@@ -167,18 +182,21 @@
                     <input type="text" id="gh-owner" required placeholder="e.g. Vakilsearch">
                 </div>
                 <div class="form-group">
-                    <label for="gh-repo">Repository Name</label>
-                    <input type="text" id="gh-repo" required placeholder="e.g. PMO_dashboard">
-                    <small style="color:var(--text-muted); font-size:0.75rem;">(This pulls issues from https://github.com/&lt;owner&gt;/&lt;repo&gt;/issues)</small>
+                    <label for="gh-project-num">Project Number</label>
+                    <input type="number" id="gh-project-num" required placeholder="e.g. 2">
+                    <small style="color:var(--text-muted); font-size:0.75rem;">(Found in your Project URL:
+                        orgs/.../projects/2)</small>
                 </div>
                 <div class="form-group">
                     <label for="gh-token">Personal Access Token (PAT)</label>
                     <input type="password" id="gh-token" required placeholder="ghp_xxxxxxxxxxxxxxxxxxx">
-                    <small style="color:var(--text-muted); font-size:0.75rem;">Requires repo read access (classic: repo, fine-grained: Issues read).</small>
+                    <small style="color:var(--text-muted); font-size:0.75rem;">Requires exactly the 'project' or
+                        'read:project' scope.</small>
                 </div>
                 <div class="modal-actions">
                     <button type="submit" class="primary-btn" id="save-github-btn">Save & Sync</button>
-                    <button type="button" class="primary-btn" id="pull-github-btn" style="background-color: #10b981;">Manual Sync</button>
+                    <button type="button" class="primary-btn" id="pull-github-btn"
+                        style="background-color: #10b981;">Manual Sync</button>
                 </div>
             </form>
         </div>
@@ -186,4 +204,5 @@
 
     <script src="script.js"></script>
 </body>
+
 </html>
