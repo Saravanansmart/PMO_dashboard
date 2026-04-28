@@ -36,7 +36,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const statusInput = document.getElementById('task-status');
     const typeInput = document.getElementById('task-type');
     const sprintInput = document.getElementById('task-sprint');
-    
+
     // Filter Elements
     const filterAssignee = document.getElementById('filter-assignee');
     const filterDate = document.getElementById('filter-date');
@@ -58,7 +58,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const ghProjectNumInput = document.getElementById('gh-project-num');
     const ghTokenInput = document.getElementById('gh-token');
     const pullGithubBtn = document.getElementById('pull-github-btn');
-    
+
     // Load existing settings
     const ghSettings = JSON.parse(localStorage.getItem('gh-settings') || '{}');
     if (ghSettings.org) ghOrgInput.value = ghSettings.org;
@@ -108,7 +108,7 @@ document.addEventListener('DOMContentLoaded', () => {
     modalOverlay.addEventListener('click', (e) => {
         if (e.target === modalOverlay) closeModal();
     });
-    
+
     // Close GH modal on outside click
     githubModal.addEventListener('click', (e) => {
         if (e.target === githubModal) githubModal.classList.remove('active');
@@ -139,13 +139,13 @@ document.addEventListener('DOMContentLoaded', () => {
             if (fDate && t.eta !== fDate) return false;
             // Support partial or exact match for Sprint numbers string
             if (fSprint && (!t.sprint || !t.sprint.toLowerCase().includes(fSprint))) return false;
-            
+
             // Search all text fields
             if (fSearch) {
                 const searchString = `${t.title} ${t.stakeholder} ${t.assignee} ${t.sprint} ${t.type}`.toLowerCase();
                 if (!searchString.includes(fSearch)) return false;
             }
-            
+
             return true;
         });
 
@@ -170,7 +170,7 @@ document.addEventListener('DOMContentLoaded', () => {
         card.className = 'task-card';
         card.draggable = true;
         card.id = `task-${task.id}`;
-        
+
         // Setup Drag events
         card.addEventListener('dragstart', (e) => {
             e.dataTransfer.setData('text/plain', task.id);
@@ -245,7 +245,7 @@ document.addEventListener('DOMContentLoaded', () => {
             sprintInput.value = '146';
             deleteTaskBtn.classList.add('hidden');
         }
-        
+
         modalOverlay.classList.add('active');
     }
 
@@ -255,14 +255,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function saveTask(e) {
         e.preventDefault();
-        
+
         const saveBtn = document.getElementById('save-task-btn');
         const origText = saveBtn.textContent;
         saveBtn.textContent = 'Saving...';
         saveBtn.disabled = true;
 
         let existingTask = idInput.value ? tasks.find(t => t.id === idInput.value) : null;
-        
+
         const taskData = {
             id: idInput.value || Date.now().toString(),
             title: titleInput.value.trim(),
@@ -328,14 +328,14 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Drag and Drop Global Functions
-    window.allowDrop = function(ev) {
+    window.allowDrop = function (ev) {
         ev.preventDefault();
         ev.currentTarget.classList.add('drag-over');
     }
 
-    window.drop = async function(ev) {
+    window.drop = async function (ev) {
         ev.preventDefault();
-        
+
         document.querySelectorAll('.kanban-cards').forEach(el => {
             el.classList.remove('drag-over');
         });
@@ -344,7 +344,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const column = ev.currentTarget.closest('.kanban-column');
         if (column && id) {
             const newStatus = column.getAttribute('data-status');
-            
+
             const taskIndex = tasks.findIndex(t => t.id === id);
             if (taskIndex !== -1 && tasks[taskIndex].status !== newStatus) {
                 tasks[taskIndex].status = newStatus;
@@ -354,7 +354,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
     };
-    
+
     document.querySelectorAll('.kanban-cards').forEach(cardContainer => {
         cardContainer.addEventListener('dragleave', (e) => {
             e.currentTarget.classList.remove('drag-over');
@@ -377,13 +377,13 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!file) return;
 
         const reader = new FileReader();
-        reader.onload = function(event) {
+        reader.onload = function (event) {
             try {
                 const importedTasks = JSON.parse(event.target.result);
                 if (!Array.isArray(importedTasks)) {
                     throw new Error("Invalid format");
                 }
-                
+
                 if (confirm('Import successful! Do you want to wipe your current board clear before loading these tasks? (Click Cancel to just merge them together)')) {
                     tasks = importedTasks;
                 } else {
@@ -399,7 +399,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     });
                     tasks = merged;
                 }
-                
+
                 saveAndRender();
                 alert(`Successfully loaded ${importedTasks.length} tasks!`);
             } catch (err) {
@@ -430,7 +430,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 localStorage.setItem('gh-users', JSON.stringify(cache));
                 return data.data.user.id;
             }
-        } catch (e) {}
+        } catch (e) { }
         return null;
     }
 
@@ -516,7 +516,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
         }
-        
+
         // Assignees
         const assignees = JSON.parse(localStorage.getItem('gh-assignees') || '[]');
         const assigneeSelect = document.getElementById('task-assignee');
@@ -541,59 +541,136 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!ghMeta) return;
         }
 
-        // 1. Create Draft Issue if not linked
+        // 1. Create Issue if not linked
         if (!task.ghItemId) {
-            const createMut = `
-            mutation($projectId: ID!, $title: String!) {
-              addProjectV2DraftIssue(input: {projectId: $projectId, title: $title}) {
-                projectItem {
-                  id
-                  content { ... on DraftIssue { id } }
+            if (ghMeta.repoId) {
+                // Create regular Issue
+                const createMut = `
+                mutation($repoId: ID!, $title: String!) {
+                  createIssue(input: {repositoryId: $repoId, title: $title}) {
+                    issue { id }
+                  }
+                }`;
+                try {
+                    const res = await fetch('https://api.github.com/graphql', {
+                        method: 'POST',
+                        headers: { 'Authorization': `Bearer ${settings.token}`, 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ query: createMut, variables: { repoId: ghMeta.repoId, title: task.title } })
+                    });
+                    const data = await res.json();
+                    const newIssue = data.data?.createIssue?.issue;
+                    
+                    if (newIssue?.id) {
+                        task.ghContentId = newIssue.id;
+                        // Now add to project
+                        const addMut = `
+                        mutation($projectId: ID!, $contentId: ID!) {
+                          addProjectV2ItemById(input: {projectId: $projectId, contentId: $contentId}) {
+                            item { id }
+                          }
+                        }`;
+                        const addRes = await fetch('https://api.github.com/graphql', {
+                            method: 'POST',
+                            headers: { 'Authorization': `Bearer ${settings.token}`, 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ query: addMut, variables: { projectId: ghMeta.id, contentId: newIssue.id } })
+                        });
+                        const addData = await addRes.json();
+                        if (addData.data?.addProjectV2ItemById?.item?.id) {
+                            task.ghItemId = addData.data.addProjectV2ItemById.item.id;
+                        }
+                    }
+                } catch (e) {
+                    console.error("Error creating issue", e);
+                    return;
                 }
-              }
-            }`;
-            try {
-                const res = await fetch('https://api.github.com/graphql', {
-                    method: 'POST',
-                    headers: { 'Authorization': `Bearer ${settings.token}`, 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ query: createMut, variables: { projectId: ghMeta.id, title: task.title } })
-                });
-                const data = await res.json();
-                const newItem = data.data?.addProjectV2DraftIssue?.projectItem;
-                if (newItem?.id) {
-                    task.ghItemId = newItem.id;
-                    task.ghContentId = newItem.content?.id;
+            } else {
+                // Fallback to Draft Issue if repo not found or not specified
+                const createMut = `
+                mutation($projectId: ID!, $title: String!) {
+                  addProjectV2DraftIssue(input: {projectId: $projectId, title: $title}) {
+                    projectItem {
+                      id
+                      content { ... on DraftIssue { id } }
+                    }
+                  }
+                }`;
+                try {
+                    const res = await fetch('https://api.github.com/graphql', {
+                        method: 'POST',
+                        headers: { 'Authorization': `Bearer ${settings.token}`, 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ query: createMut, variables: { projectId: ghMeta.id, title: task.title } })
+                    });
+                    const data = await res.json();
+                    const newItem = data.data?.addProjectV2DraftIssue?.projectItem;
+                    if (newItem?.id) {
+                        task.ghItemId = newItem.id;
+                        task.ghContentId = newItem.content?.id;
+                    }
+                } catch (e) {
+                    console.error("Error creating draft issue", e);
+                    return;
                 }
-            } catch (e) {
-                console.error("Error creating draft issue", e);
-                return;
             }
         }
 
         if (!task.ghItemId) return;
 
+        // Helper to update field
+        const updateField = async (fieldId, valueObj) => {
+            const mut = `
+            mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $value: ProjectV2FieldValue!) {
+              updateProjectV2ItemFieldValue(input: {
+                projectId: $projectId,
+                itemId: $itemId,
+                fieldId: $fieldId,
+                value: $value
+              }) { projectV2Item { id } }
+            }`;
+            await fetch('https://api.github.com/graphql', {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${settings.token}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ query: mut, variables: { projectId: ghMeta.id, itemId: task.ghItemId, fieldId: fieldId, value: valueObj } })
+            });
+        };
+
         // 2. Sync Status
         if (ghMeta.statusFieldId && task.status) {
             let optionId = ghMeta.statusOptions[task.status];
-            if (optionId) {
-                const statusMut = `
-                mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
-                  updateProjectV2ItemFieldValue(input: {
-                    projectId: $projectId,
-                    itemId: $itemId,
-                    fieldId: $fieldId,
-                    value: { singleSelectOptionId: $optionId }
-                  }) { projectV2Item { id } }
-                }`;
-                await fetch('https://api.github.com/graphql', {
-                    method: 'POST',
-                    headers: { 'Authorization': `Bearer ${settings.token}`, 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ query: statusMut, variables: { projectId: ghMeta.id, itemId: task.ghItemId, fieldId: ghMeta.statusFieldId, optionId: optionId } })
-                });
+            if (optionId) await updateField(ghMeta.statusFieldId, { singleSelectOptionId: optionId });
+        }
+
+        // 3. Sync Priority
+        const priorityField = ghMeta.fields['priority'];
+        if (priorityField && priorityField.options && task.priority) {
+            const opt = priorityField.options.find(o => o.name.toLowerCase() === task.priority.toLowerCase());
+            if (opt) await updateField(priorityField.id, { singleSelectOptionId: opt.id });
+        }
+
+        // 4. Sync Task Type
+        const typeField = ghMeta.fields['task type'] || ghMeta.fields['type'] || ghMeta.fields['task_type'];
+        if (typeField && typeField.options && task.type) {
+            const opt = typeField.options.find(o => o.name.toLowerCase() === task.type.toLowerCase());
+            if (opt) await updateField(typeField.id, { singleSelectOptionId: opt.id });
+        }
+
+        // 5. Sync Sprint
+        const sprintField = ghMeta.fields['sprint'];
+        if (sprintField && task.sprint) {
+            if (sprintField.options) {
+                // If it's a single select
+                const opt = sprintField.options.find(o => o.name.toLowerCase() === task.sprint.toLowerCase());
+                if (opt) await updateField(sprintField.id, { singleSelectOptionId: opt.id });
+            } else {
+                // Assume it's an iteration or text field. For iteration/number, text works mostly, or if it's explicitly iteration we'd need iterationId.
+                // Let's try sending it as text. If GitHub rejects it, it might be an Iteration field which requires iterationId or just text.
+                // According to GitHub GraphQL API, text is used for text fields.
+                try {
+                    await updateField(sprintField.id, { text: task.sprint.toString() });
+                } catch(e) { console.error("Error updating sprint", e); }
             }
         }
 
-        // 3. Sync Assignee
+        // 6. Sync Assignee
         if (task.assignee && task.ghContentId) {
             let userId = await getUserId(task.assignee, settings.token);
             if (userId) {
@@ -625,9 +702,9 @@ document.addEventListener('DOMContentLoaded', () => {
     async function fetchFromGitHub() {
         const settings = saveGithubSettings();
         if (!settings.org || !settings.projectNum || !settings.token) return;
-        
+
         pullGithubBtn.textContent = 'Syncing...';
-        
+
         const query = `
         query($org: String!, $num: Int!) {
           organization(login: $org) {
@@ -667,16 +744,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 body: JSON.stringify({ query, variables: { org: settings.org, num: settings.projectNum } })
             });
             const data = await res.json();
-            
+
             if (data.errors) {
                 alert("GitHub API Error: " + data.errors[0].message);
                 pullGithubBtn.textContent = 'Manual Sync';
                 return;
             }
-            
+
             const projectV2 = data.data.organization.projectV2;
             const projectItems = projectV2.items.nodes;
-            
+
             // Save project node ID for later mutations
             const meta = JSON.parse(localStorage.getItem('gh-project-meta') || '{}');
             meta.id = projectV2.id;
@@ -684,25 +761,25 @@ document.addEventListener('DOMContentLoaded', () => {
 
             let addedCount = 0;
             let uniqueAssignees = new Set(JSON.parse(localStorage.getItem('gh-assignees') || '[]'));
-            
+
             // Import org members as assignees
             if (data.data.organization.membersWithRole) {
                 data.data.organization.membersWithRole.nodes.forEach(member => {
                     if (member.login) uniqueAssignees.add(member.login);
                 });
             }
-            
+
             projectItems.forEach(item => {
                 if (!item.content || !item.content.title) return;
-                
+
                 let issueTitle = item.content.title;
                 let assignee = (item.content.assignees && item.content.assignees.nodes.length > 0) ? item.content.assignees.nodes[0].login : '';
-                
+
                 let fields = item.fieldValues.nodes;
                 // Defaults
                 let statusVal = 'backlog';
                 let priorityVal = 'Medium';
-                
+
                 // Read custom fields from V2 Project
                 fields.forEach(f => {
                     const fieldName = f.field?.name?.toLowerCase() || '';
@@ -725,7 +802,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 });
                 if (assignee) uniqueAssignees.add(assignee);
-                
+
                 // Detect if task already exists on board by matching title
                 const existingIndex = tasks.findIndex(t => t.title.toLowerCase().trim() === issueTitle.toLowerCase().trim());
                 if (existingIndex >= 0) {
@@ -751,7 +828,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     addedCount++;
                 }
             });
-            
+
             // Push any local tasks that don't exist in GitHub yet
             let pushedCount = 0;
             for (let i = 0; i < tasks.length; i++) {
@@ -766,7 +843,7 @@ document.addEventListener('DOMContentLoaded', () => {
             saveAndRender();
             alert(`Sync complete! Pulled ${projectItems.length} items. Added ${addedCount} brand new tasks. Pushed ${pushedCount} local tasks to GitHub.`);
             githubModal.classList.remove('active');
-            
+
         } catch (e) {
             alert("Error syncing with GitHub: " + e.message);
             console.error(e);
